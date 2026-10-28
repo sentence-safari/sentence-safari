@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentence Safari</title>
+<style>
+:root{
+  --night:#1d1b4a; --plum:#6b2f6e; --amber:#f2a541; --grass:#2f3a22;
+  --bone:#f7ecd6; --coral:#ff6b5b; --ok:#8fd694; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;
+  color:var(--bone); background:var(--night);
+  display:flex; flex-direction:column; min-height:100%;
+}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(1.6rem,4vw,2.4rem);margin:0}
+header{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem 1.25rem .5rem}
+.clock{min-width:7rem;text-align:right;font-variant-numeric:tabular-nums;font-size:1.3rem}
+.bar{height:6px;background:#ffffff22;margin:0 1.25rem}
+.bar i{display:block;height:100%;width:100%;background:var(--amber);transition:width .2s linear}
+.scene{
+  position:relative;flex:1;min-height:210px;margin:1rem 1.25rem 0;border-radius:14px 14px 0 0;overflow:hidden;
+  background:linear-gradient(180deg,var(--night) 0%,var(--plum) 55%,var(--amber) 100%);
+}
+.sun{position:absolute;left:50%;bottom:34%;width:120px;height:120px;margin-left:-60px;border-radius:50%;background:#ffd78a;opacity:.85}
+.ground{position:absolute;left:0;right:0;bottom:0;height:38%;background:var(--grass)}
+.track{position:absolute;left:5%;right:5%;bottom:0;height:38%}
+.stop{position:absolute;bottom:55%;transform:translateX(-50%);font-size:clamp(1.4rem,4vw,2.4rem);filter:grayscale(1) brightness(.5);transition:filter .3s}
+.stop.seen{filter:none}
+.stop.now{transform:translateX(-50%) scale(1.25)}
+.hero{position:absolute;bottom:12%;font-size:clamp(1.6rem,4vw,2.6rem);transform:translateX(-50%);transition:left .15s ease-out}
+.panel{margin:0 1.25rem;padding:1.25rem;background:#12112e;border-radius:0 0 14px 14px}
+.sentence{
+  font-family:ui-monospace,Consolas,"Courier New",monospace;
+  font-size:clamp(1.1rem,2.6vw,1.6rem);line-height:1.7;min-height:3.4em;
+}
+.sentence .d{color:var(--ok)}
+.sentence .c{background:var(--amber);color:#1d1b4a;border-radius:3px;white-space:pre}
+.sentence.bad .c{background:var(--coral)}
+.sentence .r{opacity:.75;white-space:pre-wrap}
+.stats{display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:.5rem;font-size:.95rem;opacity:.9}
+footer{padding:.8rem 1.25rem;font-size:.8rem;opacity:.6}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0c0b24dd;padding:1rem}
+.overlay[hidden]{display:none}
+.card{max-width:30rem;background:var(--bone);color:#1d1b4a;padding:1.75rem;border-radius:16px}
+.card h2{font-family:Georgia,serif;margin:.2rem 0 .6rem}
+.card p{line-height:1.5;margin:.4rem 0}
+.card dl{display:grid;grid-template-columns:auto 1fr;gap:.2rem 1rem;margin:.8rem 0}
+.card dt{opacity:.7}.card dd{margin:0;font-weight:700}
+button{font:inherit;font-weight:700;padding:.7rem 1.3rem;border:0;border-radius:10px;background:var(--plum);color:var(--bone);cursor:pointer}
+button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.hero,.bar i,.stop{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Sentence Safari</h1>
+  <div class="clock" id="clock" aria-live="off">90.0 s</div>
+</header>
+<div class="bar"><i id="fill"></i></div>
+
+<div class="scene" aria-hidden="true">
+  <div class="sun"></div><div class="ground"></div>
+  <div class="track" id="track"></div>
+</div>
+
+<main class="panel">
+  <div class="sentence" id="sentence" aria-live="polite"></div>
+  <div class="stats">
+    <span id="sStop">Stop 1 of 10</span><span id="sWpm">0 WPM</span><span id="sAcc">100% accuracy</span>
+  </div>
+</main>
+<footer>Type every letter, capital and punctuation mark exactly. A wrong key will not move the explorer.</footer>
+
+<div class="overlay" id="overlay">
+  <div class="card">
+    <h2 id="oTitle">Ready for the safari?</h2>
+    <p id="oText">Reach all 10 animals before the 90-second clock runs out. Type each sentence exactly as it appears, including capital letters and the final punctuation.</p>
+    <dl id="oStats" hidden></dl>
+    <button id="go">Start (or press Enter)</button>
+  </div>
+</div>
+
+<script>
+const POOL = [
+  ["🦒","The giraffe nibbles leaves from the tallest tree."],
+  ["🐘","Can you hear the elephants splashing in the river?"],
+  ["🦓","Every zebra has a stripe pattern that is all its own."],
+  ["🦁","Be quiet, because the lion is resting in the shade!"],
+  ["🦏","A rhino walks slowly across the dusty plain."],
+  ["🦛","Why do hippos spend the whole day in the water?"],
+  ["🐆","The cheetah runs faster than any other land animal."],
+  ["🦩","Look at the pink flamingos standing on one leg!"],
+  ["🐒","Monkeys swing from branch to branch before sunset."],
+  ["🦅","The eagle circles above, searching for its dinner."]
+];
+const TIME = 90;
+const $ = id => document.getElementById(id);
+let rounds, idx, pos, running, finished, t0, correct, errors, timer, bestKey = "sentence-safari-best";
+
+function shuffle(a){ a = a.slice(); for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+function setup(){
+  rounds = shuffle(POOL); idx = 0; pos = 0; correct = 0; errors = 0;
+  running = false; finished = false; clearInterval(timer);
+  const tr = $("track"); tr.innerHTML = "";
+  rounds.forEach((r,i)=>{
+    const s = document.createElement("div");
+    s.className = "stop"; s.id = "stop"+i; s.textContent = r[0];
+    s.style.left = (i/(rounds.length-1)*100)+"%";
+    tr.appendChild(s);
+  });
+  const h = document.createElement("div");
+  h.className = "hero"; h.id = "hero"; h.textContent = "🧭";
+  tr.appendChild(h);
+  render(); $("clock").textContent = TIME.toFixed(1)+" s"; $("fill").style.width = "100%";
+}
+
+function render(){
+  const text = rounds[idx][1];
+  const el = $("sentence");
+  const done = text.slice(0,pos), cur = text[pos] || "", rest = text.slice(pos+1);
+  el.innerHTML = "";
+  [["d",done],["c",cur],["r",rest]].forEach(([c,t])=>{
+    if(!t) return; const s=document.createElement("span"); s.className=c; s.textContent=t; el.appendChild(s);
+  });
+  const frac = (idx + pos/text.length) / (rounds.length-1);
+  $("hero").style.left = Math.min(frac,1)*100+"%";
+  rounds.forEach((_,i)=>{ const s=$("stop"+i); s.classList.toggle("seen", i<idx); s.classList.toggle("now", i===idx); });
+  $("sStop").textContent = "Stop "+(idx+1)+" of "+rounds.length;
+  stats();
+}
+
+function stats(){
+  const mins = running ? Math.max((performance.now()-t0)/60000, 1/600) : 0;
+  $("sWpm").textContent = Math.round(mins ? (correct/5)/mins : 0)+" WPM";
+  const tot = correct+errors;
+  $("sAcc").textContent = (tot ? Math.round(correct/tot*100) : 100)+"% accuracy";
+}
+
+function start(){
+  if (running) return;
+  $("overlay").hidden = true; running = true; t0 = performance.now();
+  timer = setInterval(()=>{
+    const left = Math.max(TIME-(performance.now()-t0)/1000, 0);
+    $("clock").textContent = left.toFixed(1)+" s";
+    $("fill").style.width = (left/TIME*100)+"%";
+    stats();
+    if (left<=0) end(false);
+  },100);
+}
+
+function end(won){
+  if (finished) return; finished = true; running = false; clearInterval(timer);
+  const secs = Math.min((performance.now()-t0)/1000, TIME), left = Math.max(TIME-secs,0);
+  const mins = Math.max(secs/60,1/600), tot = correct+errors;
+  const wpm = Math.round((correct/5)/mins), acc = tot ? Math.round(correct/tot*100) : 100;
+  const score = Math.max(0, correct*10 - errors*5 + (won ? Math.round(left)*20 : 0));
+  let best = 0;
+  try { best = +localStorage.getItem(bestKey) || 0; if (score>best){ best=score; localStorage.setItem(bestKey,String(score)); } } catch(e){ best = Math.max(best,score); }
+  $("oTitle").textContent = won ? "Safari complete!" : "Time is up";
+  $("oText").textContent = won ? "You reached all 10 animals." : "You reached stop "+(idx+1)+" of 10. Try again and go further.";
+  const d = $("oStats"); d.hidden = false; d.innerHTML = "";
+  [["Score",score],["Speed",wpm+" WPM"],["Accuracy",acc+"%"],["Best score",best]].forEach(([k,v])=>{
+    const a=document.createElement("dt"), b=document.createElement("dd"); a.textContent=k; b.textContent=v; d.append(a,b);
+  });
+  $("go").textContent = "Play again (or press Enter)";
+  $("overlay").hidden = false;
+}
+
+function again(){ $("oStats").hidden = true; $("oTitle").textContent="Ready for the safari?"; setup(); $("go").textContent="Start"; $("overlay").hidden=true; }
+
+document.addEventListener("keydown", e=>{
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!$("overlay").hidden){
+    if (e.key==="Enter"){ e.preventDefault(); if (finished) again(); else $("overlay").hidden = true; }
+    return;
+  }
+  if (e.key.length!==1) return;
+  e.preventDefault();
+  if (!running){ start(); }
+  const text = rounds[idx][1];
+  if (e.key === text[pos]){
+    correct++; pos++;
+    $("sentence").classList.remove("bad");
+    if (pos === text.length){
+      idx++; pos = 0;
+      if (idx === rounds.length){ idx = rounds.length-1; pos = text.length; render(); $("stop"+idx).classList.add("seen"); end(true); return; }
+    }
+  } else {
+    errors++; $("sentence").classList.add("bad");
+  }
+  render();
+});
+
+$("go").addEventListener("click", ()=>{ if (finished) again(); $("overlay").hidden = true; });
+setup();
+</script>
+</body>
+</html>
